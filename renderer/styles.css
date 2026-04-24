@@ -329,18 +329,40 @@ html, body {
 
 .pane-separator {
   background: var(--border);
-  z-index: 1;
+  z-index: 3;
   transition: background 0.15s;
+  position: relative;
 }
 
 .pane-separator-col {
   cursor: col-resize;
-  /* spans full height via grid-row set in JS */
 }
 
 .pane-separator-row {
   cursor: row-resize;
-  /* spans full width automatically within col-wrapper */
+}
+
+/* Expanded invisible hit area so separators are easy to grab */
+.pane-separator::after {
+  content: '';
+  position: absolute;
+  z-index: 4;
+}
+
+.pane-separator-col::after {
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  right: -4px;
+  cursor: col-resize;
+}
+
+.pane-separator-row::after {
+  left: 0;
+  right: 0;
+  top: -6px;
+  bottom: -6px;
+  cursor: row-resize;
 }
 
 .pane-separator:hover,
