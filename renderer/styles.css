@@ -1,12 +1,12 @@
 :root {
   --bg: #ffffff;
-  --sidebar-bg: #f6f8fa;
-  --border: #d0d7de;
+  --sidebar-bg: #f5f5f4;
+  --border: #e2e2e0;
   --accent: #0969da;
-  --fg: #1f2328;
-  --fg-muted: #656d76;
-  --tab-active-bg: #eaeef2;
-  --danger: #f85149;
+  --fg: #1c1c1a;
+  --fg-muted: #6b7280;
+  --tab-active-bg: #ebebea;
+  --danger: #cf222e;
   --sidebar-width: 200px;
 }
 
@@ -154,10 +154,13 @@ html, body {
 #sidebar-footer {
   padding: 10px 10px 12px;
   border-top: 1px solid var(--border);
+  display: flex;
+  gap: 6px;
+  align-items: center;
 }
 
 #btn-new-tab {
-  width: 100%;
+  flex: 1;
   padding: 7px 10px;
   background: transparent;
   border: 1px solid var(--border);
@@ -174,6 +177,118 @@ html, body {
   color: var(--accent);
   border-color: var(--accent);
 }
+
+#btn-settings {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+
+#btn-settings:hover {
+  background: rgba(88, 166, 255, 0.08);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ─── Settings panel ──────────────────────────────────── */
+
+.settings-panel {
+  position: fixed;
+  bottom: 60px;
+  left: 10px;
+  width: 220px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+  z-index: 200;
+  font-size: 13px;
+  color: var(--fg);
+}
+
+.settings-panel.hidden { display: none; }
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.settings-header button {
+  background: none;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.settings-header button:hover { color: var(--fg); }
+
+.settings-body {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--fg);
+  gap: 8px;
+}
+
+.settings-label input[type="number"] {
+  width: 56px;
+  padding: 4px 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg);
+  font-size: 13px;
+  text-align: center;
+}
+
+.settings-label input[type="number"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+#settings-save {
+  align-self: flex-end;
+  padding: 5px 14px;
+  background: var(--accent);
+  border: none;
+  border-radius: 5px;
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+  transition: opacity 0.1s;
+}
+
+#settings-save:hover { opacity: 0.85; }
 
 /* ─── Resize handle ───────────────────────────────────── */
 
@@ -197,12 +312,19 @@ html, body {
 #workspace {
   flex: 1;
   display: grid;
-  grid-template-columns: calc(50% - 1px) 2px calc(50% - 1px);
-  grid-template-rows: calc(50% - 1px) 2px calc(50% - 1px);
   gap: 0;
   background: transparent;
   overflow: hidden;
   min-width: 0;
+  min-height: 0;
+}
+
+.col-wrapper {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .pane-separator {
@@ -213,14 +335,12 @@ html, body {
 
 .pane-separator-col {
   cursor: col-resize;
-  width: 100%;
-  height: 100%;
+  /* spans full height via grid-row set in JS */
 }
 
 .pane-separator-row {
   cursor: row-resize;
-  width: 100%;
-  height: 100%;
+  /* spans full width automatically within col-wrapper */
 }
 
 .pane-separator:hover,
@@ -245,6 +365,7 @@ html, body {
   flex: 1;
   overflow: hidden;
   min-height: 0;
+  padding-left: 1px;
 }
 
 .term-pane-xterm .xterm {
@@ -256,7 +377,7 @@ html, body {
 }
 
 .term-pane.focused-pane {
-  box-shadow: inset 0 0 0 1px var(--accent);
+  box-shadow: inset 0 2px 0 0 var(--accent);
 }
 
 

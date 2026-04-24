@@ -12,5 +12,10 @@ contextBridge.exposeInMainWorld('pty', {
     ipcRenderer.removeAllListeners('pty-exit');
   },
   onThemeToggle: (cb) => ipcRenderer.on('theme-toggle', (_, mode) => cb(mode)),
-  onFontSize: (cb) => ipcRenderer.on('font-size', (_, action) => cb(action)),
+  onFontSize:    (cb) => ipcRenderer.on('font-size',    (_, action) => cb(action)),
+});
+
+contextBridge.exposeInMainWorld('appSettings', {
+  load: ()       => ipcRenderer.invoke('settings-load'),
+  save: (s)      => ipcRenderer.invoke('settings-save', s),
 });

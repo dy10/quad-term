@@ -17,11 +17,30 @@
       <ul id="tab-list"></ul>
       <div id="sidebar-footer">
         <button id="btn-new-tab" title="New Tab (Ctrl+T)">+ New Tab</button>
+        <button id="btn-settings" title="Settings">⚙</button>
       </div>
     </aside>
     <div id="resize-handle"></div>
     <main id="workspace"></main>
   </div>
+  <div id="settings-panel" class="settings-panel hidden">
+    <div class="settings-header">
+      <span>Settings</span>
+      <button id="settings-close">✕</button>
+    </div>
+    <div class="settings-body">
+      <label class="settings-label">
+        Default columns
+        <input id="settings-cols" type="number" min="1" max="8" value="2">
+      </label>
+      <label class="settings-label">
+        Default rows
+        <input id="settings-rows" type="number" min="1" max="8" value="2">
+      </label>
+      <button id="settings-save">Save</button>
+    </div>
+  </div>
+
   <div id="context-menu" class="context-menu hidden">
     <div class="context-item" id="ctx-rename">Rename</div>
     <div class="context-item" id="ctx-close">Close</div>

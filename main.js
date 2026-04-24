@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, Menu, MenuItem } = require('electron');
 const pty = require('node-pty');
 const path = require('path');
 const os = require('os');
+const fs = require('fs');
 
 const ptyMap = new Map(); // termId -> IPty
 let win = null;
@@ -12,7 +13,7 @@ function createWindow() {
     height: 800,
     minWidth: 600,
     minHeight: 400,
-    backgroundColor: '#eff1f5',
+    backgroundColor: '#ffffff',
     titleBarStyle: 'default',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -108,6 +109,30 @@ ipcMain.handle('pty-kill', (event, { termId }) => {
   return { success: true };
 });
 
+// ─── Settings ────────────────────────────────────────────────────────────────
+
+const SETTINGS_DIR  = path.join(os.homedir(), '.quad-term');
+const SETTINGS_FILE = path.join(SETTINGS_DIR, 'settings.json');
+
+const DEFAULT_SETTINGS = { defaultCols: 2, defaultRows: 2 };
+
+function loadSettings() {
+  try {
+    const raw = fs.readFileSync(SETTINGS_FILE, 'utf8');
+    return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+  } catch (_) {
+    return { ...DEFAULT_SETTINGS };
+  }
+}
+
+function saveSettings(settings) {
+  fs.mkdirSync(SETTINGS_DIR, { recursive: true });
+  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf8');
+}
+
+ipcMain.handle('settings-load', () => loadSettings());
+ipcMain.handle('settings-save', (_, settings) => { saveSettings(settings); return { success: true }; });
+
 function buildMenu() {
   const isMac = process.platform === 'darwin';
   let isDark = false;
@@ -123,7 +148,7 @@ function buildMenu() {
           label: 'Dark Background',
           type: 'checkbox',
           checked: false,
-          accelerator: 'CmdOrCtrl+Shift+D',
+          accelerator: 'CmdOrCtrl+Shift+T',
           click(menuItem) {
             isDark = menuItem.checked;
             if (win && !win.isDestroyed()) {
