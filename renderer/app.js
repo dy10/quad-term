@@ -185,6 +185,33 @@ function getActiveTab() {
   return state.tabs.find(t => t.id === state.activeTabId) || null;
 }
 
+// ─── Fit / resize ────────────────────────────────────────────────────────────
+
+function fitAllVisible() {
+  const tab = getActiveTab();
+  if (!tab) return;
+
+  const closed = tab.closedPanes || new Set();
+  for (let i = 0; i < 4; i++) {
+    if (closed.has(i)) continue;
+    const termId = tab.panes[i];
+    const entry = terminals.get(termId);
+    if (!entry) continue;
+    try {
+      entry.fitAddon.fit();
+      const { cols, rows } = entry.xterm;
+      window.pty.resize({ termId, cols, rows });
+    } catch (_) {}
+  }
+}
+
+const debouncedFit = debounce(fitAllVisible, 80);
+window.addEventListener('resize', () => {
+  const tab = getActiveTab();
+  if (tab) updateWorkspaceLayout(tab);
+  debouncedFit();
+});
+
 // ─── PTY global listeners ─────────────────────────────────────────────────────
 
 window.pty.onData(({ termId, data }) => {
@@ -192,31 +219,183 @@ window.pty.onData(({ termId, data }) => {
   if (entry) entry.xterm.write(data);
 });
 
-window.pty.onExit(({ termId, exitCode }) => {
+window.pty.onExit(({ termId }) => {
   const entry = terminals.get(termId);
   if (!entry) return;
   entry.alive = false;
-  // Write exit notice to terminal
-  entry.xterm.write(`\r\n\x1b[38;5;240m[Process exited with code ${exitCode ?? 0}]\x1b[0m\r\n`);
-  // Show restart overlay
-  showExitOverlay(termId, entry.paneEl);
+  closePane(termId);
 });
 
-function showExitOverlay(termId, domEl) {
-  // Remove any existing overlay
-  const old = domEl.querySelector('.pane-exit-overlay');
-  if (old) old.remove();
+// ─── Pane close (collapse) ────────────────────────────────────────────────────
 
-  const overlay = document.createElement('div');
-  overlay.className = 'pane-exit-overlay';
-  overlay.innerHTML = `<span>Shell exited</span>
-    <button class="restart-btn">Restart</button>`;
-  overlay.querySelector('.restart-btn').addEventListener('click', () => {
-    overlay.remove();
-    restartPane(termId);
-  });
-  domEl.appendChild(overlay);
+// closedPanes: Set of pane indices (0-3) that have been closed for the active tab
+// We store this per-tab: tab.closedPanes = Set<0|1|2|3>
+
+function getTabForPane(termId) {
+  return state.tabs.find(t => t.panes.includes(termId)) || null;
 }
+
+function closePane(termId) {
+  const tab = getTabForPane(termId);
+  if (!tab) return;
+
+  const idx = tab.panes.indexOf(termId);
+  if (idx === -1) return;
+
+  if (!tab.closedPanes) tab.closedPanes = new Set();
+  tab.closedPanes.add(idx);
+
+  // Kill the PTY and dispose the terminal
+  window.pty.kill({ termId });
+  const entry = terminals.get(termId);
+  if (entry) {
+    entry.xterm.dispose();
+    terminals.delete(termId);
+  }
+
+  // If all panes in this tab are now closed, close the tab itself
+  const openIndices = [0, 1, 2, 3].filter(i => !tab.closedPanes.has(i));
+  if (openIndices.length === 0) {
+    closeTab(tab.id);
+    return;
+  }
+
+  // Only update DOM if this tab is currently visible
+  if (tab.id !== state.activeTabId) return;
+
+  // Remove the DOM pane element
+  const paneEl = workspace.querySelector(`[data-pane-index="${idx}"]`);
+  if (paneEl) paneEl.remove();
+
+  // Rebuild layout with separators
+  updateWorkspaceLayout(tab);
+
+  // Prefer the pane that expanded into the closed space:
+  // 1. column-partner (same column, other row) — directly expands to fill it
+  // 2. row-partner (same row, other column) — adjacent neighbor
+  // 3. fallback: first open pane
+  const colPartner = idx < 2 ? idx + 2 : idx - 2;
+  const rowNeighbor = idx % 2 === 0 ? idx + 1 : idx - 1;
+  const focusIdx = openIndices.includes(colPartner) ? colPartner
+    : openIndices.includes(rowNeighbor) ? rowNeighbor
+    : openIndices[0];
+  setActivePaneById(tab.panes[focusIdx]);
+
+  requestAnimationFrame(fitAllVisible);
+}
+
+// ─── Workspace layout (grid + separators) ────────────────────────────────────
+
+// Per-tab split ratios (0..1), default 0.5
+// tabSplits[tabId] = { col: 0.5, row: 0.5 }
+const tabSplits = {};
+
+function getSplits(tabId) {
+  if (!tabSplits[tabId]) tabSplits[tabId] = { col: 0.5, row: 0.5 };
+  return tabSplits[tabId];
+}
+
+function updateWorkspaceLayout(tab) {
+  const layout = computeLayout(tab.closedPanes || new Set(), getSplits(tab.id));
+
+  workspace.style.gridTemplateColumns = layout.gridTemplateColumns;
+  workspace.style.gridTemplateRows    = layout.gridTemplateRows;
+  workspace.style.gap        = '0';
+  workspace.style.background = 'transparent';
+
+  workspace.querySelectorAll('.term-pane[data-pane-index]').forEach(paneEl => {
+    const idx = parseInt(paneEl.dataset.paneIndex, 10);
+    const p = layout.panes[idx];
+    if (p) {
+      paneEl.style.gridColumn = p.gridColumn;
+      paneEl.style.gridRow    = p.gridRow;
+    }
+  });
+
+  rebuildSeparators(tab, layout.showColSep, layout.showRowSep);
+}
+
+// ─── Separator drag handles ───────────────────────────────────────────────────
+
+let activeSeparatorDrag = null; // { type: 'col'|'row', startPos, startRatio, tabId }
+
+function rebuildSeparators(tab, hasColSep, hasRowSep) {
+  // Remove old separators
+  workspace.querySelectorAll('.pane-separator').forEach(el => el.remove());
+
+  if (hasColSep) {
+    const sep = document.createElement('div');
+    sep.className = 'pane-separator pane-separator-col';
+    sep.dataset.type = 'col';
+    // Place in grid column 2 (the 2px gap column), spanning all rows
+    sep.style.gridColumn = '2';
+    sep.style.gridRow = '1 / -1';
+    workspace.appendChild(sep);
+
+    sep.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      activeSeparatorDrag = {
+        type: 'col',
+        startPos: e.clientX,
+        startRatio: getSplits(tab.id).col,
+        tabId: tab.id,
+      };
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    });
+  }
+
+  if (hasRowSep) {
+    const sep = document.createElement('div');
+    sep.className = 'pane-separator pane-separator-row';
+    sep.dataset.type = 'row';
+    // Place in grid row 2 (the 2px gap row), spanning all columns
+    sep.style.gridColumn = '1 / -1';
+    sep.style.gridRow = '2';
+    workspace.appendChild(sep);
+
+    sep.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      activeSeparatorDrag = {
+        type: 'row',
+        startPos: e.clientY,
+        startRatio: getSplits(tab.id).row,
+        tabId: tab.id,
+      };
+      document.body.style.cursor = 'row-resize';
+      document.body.style.userSelect = 'none';
+    });
+  }
+}
+
+document.addEventListener('mousemove', (e) => {
+  if (!activeSeparatorDrag) return;
+
+  const tab = state.tabs.find(t => t.id === activeSeparatorDrag.tabId);
+  if (!tab) return;
+
+  const splits = getSplits(activeSeparatorDrag.tabId);
+
+  const rect = workspace.getBoundingClientRect();
+  if (activeSeparatorDrag.type === 'col') {
+    const newX = e.clientX - rect.left;
+    splits.col = Math.max(0.1, Math.min(0.9, newX / rect.width));
+  } else {
+    const newY = e.clientY - rect.top;
+    splits.row = Math.max(0.1, Math.min(0.9, newY / rect.height));
+  }
+
+  updateWorkspaceLayout(tab);
+  debouncedFit();
+});
+
+document.addEventListener('mouseup', () => {
+  if (!activeSeparatorDrag) return;
+  activeSeparatorDrag = null;
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+  fitAllVisible();
+});
 
 // ─── Spawn / restart pane ────────────────────────────────────────────────────
 
@@ -259,27 +438,39 @@ async function spawnPane(termId, domEl, paneIndex, paneEl) {
   clickTarget.addEventListener('mousedown', () => setActivePaneById(termId));
 }
 
-async function restartPane(termId) {
-  const entry = terminals.get(termId);
-  if (!entry) return;
+// ─── Open (split) a closed pane slot ─────────────────────────────────────────
 
-  // Kill old pty if still tracked
-  await window.pty.kill({ termId });
+async function openPane(direction) {
+  const tab = getActiveTab();
+  if (!tab) return;
 
-  const { xterm, fitAddon, domEl } = entry;
+  const currentIdx = tab.panes.indexOf(state.activePaneTermId);
+  if (currentIdx === -1) return;
 
-  // Clear terminal and re-spawn
-  xterm.clear();
-  xterm.reset();
-  entry.alive = true;
+  const targetIdx = splitTarget(currentIdx, direction);
+  if (targetIdx === null) return;          // not geometrically possible
+  if (!tab.closedPanes.has(targetIdx)) return; // slot already occupied
 
-  fitAddon.fit();
-  const { cols, rows } = xterm;
+  tab.closedPanes.delete(targetIdx);
 
-  const result = await window.pty.create({ termId, cols, rows });
-  if (!result.success) {
-    xterm.write(`\r\n\x1b[31m[Failed to restart shell: ${result.error}]\x1b[0m\r\n`);
-  }
+  const termId = tab.panes[targetIdx];
+  const paneEl = document.createElement('div');
+  paneEl.className = 'term-pane';
+  paneEl.dataset.termId = termId;
+  paneEl.dataset.paneIndex = String(targetIdx);
+
+  const xtermEl = document.createElement('div');
+  xtermEl.className = 'term-pane-xterm';
+  paneEl.appendChild(xtermEl);
+  workspace.appendChild(paneEl);
+
+  await spawnPane(termId, xtermEl, targetIdx, paneEl);
+
+  updateWorkspaceLayout(tab);
+  requestAnimationFrame(() => {
+    fitAllVisible();
+    setActivePaneById(termId);
+  });
 }
 
 // ─── Tab management ──────────────────────────────────────────────────────────
@@ -289,7 +480,7 @@ function createTab(name) {
   const tabName = name || randomGalaxyName();
   const panes = [genId(), genId(), genId(), genId()]; // 4 termIds
 
-  const tab = { id, name: tabName, panes };
+  const tab = { id, name: tabName, panes, closedPanes: new Set() };
   state.tabs.push(tab);
 
   renderSidebar();
@@ -338,14 +529,24 @@ async function switchToTab(tabId) {
   state.activeTabId = tabId;
   renderSidebar();
 
+  if (!tab.closedPanes) tab.closedPanes = new Set();
+
   // Clear workspace and rebuild pane grid
   workspace.innerHTML = '';
+  // Reset grid to default (updateWorkspaceLayout will set proper values)
+  workspace.style.gridTemplateColumns = '';
+  workspace.style.gridTemplateRows = '';
+  workspace.style.gap = '';
+  workspace.style.background = '';
 
   for (let i = 0; i < 4; i++) {
+    if (tab.closedPanes.has(i)) continue; // skip closed panes
+
     const termId = tab.panes[i];
     const paneEl = document.createElement('div');
     paneEl.className = 'term-pane';
     paneEl.dataset.termId = termId;
+    paneEl.dataset.paneIndex = String(i);
 
     const xtermEl = document.createElement('div');
     xtermEl.className = 'term-pane-xterm';
@@ -365,13 +566,20 @@ async function switchToTab(tabId) {
     }
   }
 
+  // Apply layout with separators
+  updateWorkspaceLayout(tab);
+
   // Fit all after layout settles
   requestAnimationFrame(() => {
     fitAllVisible();
-    const firstTermId = tab.panes[state.activePaneTermId && tab.panes.includes(state.activePaneTermId)
+    const openPanes = [0, 1, 2, 3].filter(i => !tab.closedPanes.has(i));
+    const preferredIndex = state.activePaneTermId && tab.panes.includes(state.activePaneTermId)
       ? tab.panes.indexOf(state.activePaneTermId)
-      : 0];
-    setActivePaneById(firstTermId);
+      : -1;
+    const targetIndex = openPanes.includes(preferredIndex) ? preferredIndex : openPanes[0];
+    if (targetIndex !== undefined && targetIndex !== -1) {
+      setActivePaneById(tab.panes[targetIndex]);
+    }
   });
 }
 
@@ -396,25 +604,6 @@ function focusPaneByIndex(index) {
   if (termId) setActivePaneById(termId);
 }
 
-// ─── Fit / resize ────────────────────────────────────────────────────────────
-
-function fitAllVisible() {
-  const tab = getActiveTab();
-  if (!tab) return;
-
-  for (const termId of tab.panes) {
-    const entry = terminals.get(termId);
-    if (!entry) continue;
-    try {
-      entry.fitAddon.fit();
-      const { cols, rows } = entry.xterm;
-      window.pty.resize({ termId, cols, rows });
-    } catch (_) {}
-  }
-}
-
-const debouncedFit = debounce(fitAllVisible, 80);
-window.addEventListener('resize', debouncedFit);
 
 // ─── Sidebar render ──────────────────────────────────────────────────────────
 
@@ -632,6 +821,20 @@ document.addEventListener('keydown', (e) => {
       if (tab) switchToTab(tab.id);
       return;
     }
+  }
+
+  // Cmd+D: split current pane — open a new pane below
+  if (e.key === 'd' && !e.shiftKey) {
+    e.preventDefault();
+    openPane('down');
+    return;
+  }
+
+  // Cmd+Shift+D: split current pane — open a new pane to the right
+  if (e.key === 'd' && e.shiftKey) {
+    e.preventDefault();
+    openPane('right');
+    return;
   }
 
   // Ctrl+Shift+[ / ] or Cmd+Shift+[ / ]: previous/next tab

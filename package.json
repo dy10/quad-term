@@ -6,6 +6,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --inspect",
+    "test": "node --test test/layout.test.js",
     "postinstall": "node rebuild.js"
   },
   "dependencies": {
