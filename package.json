@@ -1,0 +1,20 @@
+{
+  "name": "quad-term",
+  "version": "1.0.0",
+  "description": "Four-pane terminal multiplexer",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --inspect",
+    "postinstall": "node rebuild.js"
+  },
+  "dependencies": {
+    "node-pty": "^1.0.0",
+    "xterm": "^5.3.0",
+    "xterm-addon-fit": "^0.8.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.7.2",
+    "electron": "^29.0.0"
+  }
+}
