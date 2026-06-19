@@ -15,7 +15,7 @@
     "xterm-addon-fit": "^0.8.0"
   },
   "devDependencies": {
-    "@electron/rebuild": "^3.7.2",
+    "@electron/rebuild": "^4.0.4",
     "electron": "39.8.8"
   }
 }
